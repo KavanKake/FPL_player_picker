@@ -82,7 +82,7 @@ body {
             display: flex;
             flex-direction: column;
             gap: 20px;
-            width: 320px;
+            width: 400px;
         }
 
         .first-choice, .other-choices {
