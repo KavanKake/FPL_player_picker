@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "fpl",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["fpl.py"],
+      "port": 5000
+    }
+  ]
+}

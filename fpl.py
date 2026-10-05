@@ -1,4 +1,4 @@
-# app.py
+# fpl.py
 from flask import Flask, render_template, request
 import requests
 import pandas as pd
@@ -8,7 +8,7 @@ app = Flask(__name__)
 
 # --- posisjonskart (godtar flere varianter) ---
 POSITION_MAP = {
-    'goalkeeper': 1, 'keeper': 1, 'gk': 1, 'keeper': 1, 'målmann': 1,
+    'goalkeeper': 1, 'keeper': 1, 'gk': 1, 'målmann': 1,
     'defender': 2, 'forsvarer': 2, 'def': 2,
     'midfielder': 3, 'midtbane': 3, 'mid': 3,
     'forward': 4, 'angriper': 4, 'fw': 4, 'striker': 4
@@ -19,6 +19,12 @@ def parse_position_input(s: str):
         return None
     key = s.strip().lower()
     return POSITION_MAP.get(key, None)
+
+def foto_url(code):
+    """ Bygg URL til spillerbildet fra Premier League sin CDN. """
+    if code is None or pd.isna(code):
+        return None
+    return f"https://resources.premierleague.com/premierleague/photos/players/110x140/p{int(code)}.png"
 
 # ----------------- Hent data -----------------
 def hent_data():
@@ -63,8 +69,8 @@ def lag_form(team_id, fixtures, window=5):
     return gs / n, gc / n
 
 # ----------------- Beste nå (enkel score basert på form + ppg) -----------------
-def anbefalt_spillere(budsjett: float, posisjon_input: str, antall: int = 5):
-    players_json = requests.get("https://fantasy.premierleague.com/api/bootstrap-static/").json()
+def anbefalt_spillere(budsjett: float, posisjon_input: str, antall: int = 5, min_minutter: int = 0):
+    players_json = requests.get("https://fantasy.premierleague.com/api/bootstrap-static/", timeout=10).json()
     players = pd.json_normalize(players_json, record_path=['elements'])
     teams = pd.json_normalize(players_json, record_path=['teams'])
     types = pd.json_normalize(players_json, record_path=['element_types'])
@@ -83,6 +89,9 @@ def anbefalt_spillere(budsjett: float, posisjon_input: str, antall: int = 5):
 
     # filter på budsjett (now_cost er i 0.1M enheter; 50 -> £5.0)
     df = df[df['now_cost'] / 10 <= budsjett]
+
+    # filtrer bort spillere med for lite spilletid (gir støy i form/ppg)
+    df = df[pd.to_numeric(df['minutes'], errors='coerce').fillna(0) >= min_minutter]
 
     if df.empty:
         return []
@@ -109,6 +118,9 @@ def anbefalt_spillere(budsjett: float, posisjon_input: str, antall: int = 5):
             "first_name": row.get("first_name", ""),
             "second_name": row.get("second_name", ""),
             "team_name": row.get("team_name", ""),
+            "position": row.get("position", ""),
+            "minutes": int(pd.to_numeric(row.get("minutes"), errors='coerce') or 0),
+            "photo": foto_url(row.get("code")),
             "now_cost": float(row.get("now_cost", 0)),
             "form": float(row.get("form", 0.0)),
             "points_per_game": float(row.get("points_per_game", 0.0)),
@@ -169,7 +181,7 @@ def forventet_score(spiller_row, fixtures, antall_fixtures=3):
 
     return sum(pred_scores) / len(pred_scores) if pred_scores else 0.0
 
-def anbefalt_spillere_fremover(budsjett: float, posisjon_input: str, antall: int = 5):
+def anbefalt_spillere_fremover(budsjett: float, posisjon_input: str, antall: int = 5, min_minutter: int = 0):
     players_json, fixtures = hent_data()
     df_players = pd.DataFrame(players_json['elements'])
     df_teams = pd.DataFrame(players_json['teams'])
@@ -186,6 +198,7 @@ def anbefalt_spillere_fremover(budsjett: float, posisjon_input: str, antall: int
         df = df[df['position'].str.lower() == posisjon_input.strip().lower()]
 
     df = df[df['now_cost'] / 10 <= budsjett]
+    df = df[pd.to_numeric(df['minutes'], errors='coerce').fillna(0) >= min_minutter]
     if df.empty:
         return []
 
@@ -199,6 +212,9 @@ def anbefalt_spillere_fremover(budsjett: float, posisjon_input: str, antall: int
             "first_name": row.get("first_name", ""),
             "second_name": row.get("second_name", ""),
             "team_name": row.get("team_name", ""),
+            "position": row.get("position", ""),
+            "minutes": int(pd.to_numeric(row.get("minutes"), errors='coerce') or 0),
+            "photo": foto_url(row.get("code")),
             "now_cost": float(row.get("now_cost", 0)),
             "form": float(pd.to_numeric(row.get("form"), errors='coerce') or 0.0),
             "points_per_game": float(pd.to_numeric(row.get("points_per_game"), errors='coerce') or 0.0),
@@ -215,21 +231,27 @@ def index():
     fremover = []
     mode = None
     error = None
+    budsjett = None
+    posisjon = 'Midfielder'
+    min_minutter = 180
 
     if request.method == 'POST':
         try:
-            budsjett = float(request.form.get('budsjett', 0))
             posisjon = request.form.get('posisjon', '')
             mode = request.form.get('mode', 'na')
+            budsjett = float(request.form.get('budsjett', 0))
+            min_minutter = max(0, int(request.form.get('min_minutter') or 0))
 
             if mode == 'na':
-                spillere = anbefalt_spillere(budsjett, posisjon, antall=5)
+                spillere = anbefalt_spillere(budsjett, posisjon, antall=5, min_minutter=min_minutter)
             elif mode == 'fremover':
-                fremover = anbefalt_spillere_fremover(budsjett, posisjon, antall=5)
+                fremover = anbefalt_spillere_fremover(budsjett, posisjon, antall=5, min_minutter=min_minutter)
         except Exception as e:
             error = str(e)
 
-    return render_template('index.html', spillere=spillere, fremover=fremover, mode=mode, error=error)
+    resultater = spillere if mode == 'na' else fremover
+    return render_template('index.html', resultater=resultater, mode=mode, error=error,
+                           budsjett=budsjett, posisjon=posisjon, min_minutter=min_minutter)
 
 if __name__ == "__main__":
     app.run(debug=True)

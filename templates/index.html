@@ -2,83 +2,125 @@
 <html lang="no">
 <head>
     <meta charset="utf-8">
-    <title>Premier League Fantasy Player Recommender</title>
-    <link rel="preconnect" href="https://fonts.gstatic.com">
-    <link href="https://fonts.googleapis.com/css2?family=Mali&display=swap" rel="stylesheet">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>FPL Player Picker</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <div class="wrap">
-        <h1>Premier League Fantasy Player Recommender</h1>
+        <header class="hero">
+            <span class="badge">⚽ Fantasy Premier League</span>
+            <h1>FPL Player Picker</h1>
+            <p class="subtitle">Find the best players for your budget – right now or for the upcoming gameweeks.</p>
+        </header>
 
-        <div class="page">
+        <main class="page">
             <!-- Venstre side (form) -->
-            <form method="POST" class="form-box">
-                <label>Budget (£m):</label>
-                <input type="number" name="budsjett" step="0.1" required>
+            <form method="POST" class="card form-box">
+                <h2>Search</h2>
 
-                <label>Position:</label>
-                <select name="posisjon" required>
-                    <option value="Goalkeeper">Keeper</option>
-                    <option value="Defender">Defence</option>
-                    <option value="Midfielder">Midfielder</option>
-                    <option value="Forward">Attacker</option>
-                </select>
+                <label for="budsjett">Max price (£m)</label>
+                <input id="budsjett" type="number" name="budsjett" step="0.1" min="3.5" max="16"
+                       placeholder="e.g. 7.5" value="{{ budsjett if budsjett is not none else '' }}" required>
+
+                <label for="min_minutter">Min. minutes played</label>
+                <input id="min_minutter" type="number" name="min_minutter" step="45" min="0"
+                       value="{{ min_minutter }}">
+
+                <span class="label">Position</span>
+                <div class="positions">
+                    {% for value, short, name in [('Goalkeeper','GK','Keeper'), ('Defender','DEF','Defender'), ('Midfielder','MID','Midfielder'), ('Forward','FWD','Forward')] %}
+                        <label class="pos">
+                            <input type="radio" name="posisjon" value="{{ value }}" {% if posisjon == value %}checked{% endif %} required>
+                            <span><strong>{{ short }}</strong>{{ name }}</span>
+                        </label>
+                    {% endfor %}
+                </div>
 
                 <div class="buttons">
-                    <button type="submit" name="mode" value="na">Best now</button>
-                    <button type="submit" name="mode" value="fremover">Best for future</button>
+                    <button type="submit" name="mode" value="na" class="btn {% if mode != 'fremover' %}primary{% endif %}">Best now</button>
+                    <button type="submit" name="mode" value="fremover" class="btn {% if mode == 'fremover' %}primary{% endif %}">Best for future</button>
                 </div>
+
+                <p class="hint">
+                    <strong>Best now</strong> ranks by form and points per game.
+                    <strong>Best for future</strong> also weighs the next 3 fixtures.
+                    Players under the minimum minutes are left out to avoid small-sample flukes.
+                </p>
             </form>
 
             <!-- Høyre side (resultater) -->
-            <div class="results">
+            <section class="results">
                 {% if error %}
-                    <div class="error"><strong>Error:</strong> {{ error }}</div>
+                    <div class="card error"><strong>Something went wrong:</strong> {{ error }}</div>
                 {% endif %}
 
-                {% if mode == 'na' and spillere %}
-                    <div class="first-choice">
-                        <strong>First choice:</strong>
-                        <p>1. <strong>{{ spillere[0].first_name }} {{ spillere[0].second_name }}</strong> ({{ spillere[0].team_name }})  
-                        – £{{ (spillere[0].now_cost / 10) | round(1) }}m  
-                        – Form: {{ spillere[0].form }} – PPG: {{ spillere[0].points_per_game }}</p>
-                    </div>
-                    <div class="other-choices">
-                        <strong>Other choices:</strong>
-                        <ol>
-                            {% for s in spillere[1:] %}
+                {% if resultater %}
+                    {% set first = resultater[0] %}
+                    <h2 class="results-title">
+                        {{ 'Best picks right now' if mode == 'na' else 'Best picks for the next 3 fixtures' }}
+                        <span>£{{ budsjett }}m · {{ posisjon }} · {{ min_minutter }}+ min</span>
+                    </h2>
+
+                    <article class="card first-choice">
+                        <div class="photo">
+                            {% if first.photo %}<img src="{{ first.photo }}" alt="{{ first.first_name }} {{ first.second_name }}" onerror="this.remove()">{% endif %}
+                        </div>
+                        <div class="info">
+                            <span class="tag">#1 First choice</span>
+                            <h3>{{ first.first_name }} <strong>{{ first.second_name }}</strong></h3>
+                            <p class="team">{{ first.team_name }} · {{ first.position }}</p>
+                            <dl class="stats">
+                                <div><dt>Price</dt><dd>£{{ (first.now_cost / 10) | round(1) }}m</dd></div>
+                                <div><dt>Form</dt><dd>{{ first.form }}</dd></div>
+                                <div><dt>PPG</dt><dd>{{ first.points_per_game }}</dd></div>
+                                <div><dt>Minutes</dt><dd>{{ first.minutes }}</dd></div>
+                                {% if mode == 'fremover' %}
+                                    <div><dt>Expected</dt><dd>{{ first.future_score | round(2) }}</dd></div>
+                                {% endif %}
+                            </dl>
+                        </div>
+                    </article>
+
+                    {% if resultater | length > 1 %}
+                        <ol class="card other-choices">
+                            {% for s in resultater[1:] %}
                                 <li>
-                                    <strong>{{ loop.index + 1 }}. {{ s.first_name }} {{ s.second_name }}</strong> ({{ s.team_name }})  
-                                    – £{{ (s.now_cost / 10) | round(1) }}m — Form: {{ s.form }} — PPG: {{ s.points_per_game }}
+                                    <span class="rank">{{ loop.index + 1 }}</span>
+                                    <div class="mini-photo">
+                                        {% if s.photo %}<img src="{{ s.photo }}" alt="" loading="lazy" onerror="this.remove()">{% endif %}
+                                    </div>
+                                    <div class="name">
+                                        <strong>{{ s.first_name }} {{ s.second_name }}</strong>
+                                        <small>{{ s.team_name }}</small>
+                                    </div>
+                                    <div class="mini-stats">
+                                        <span>£{{ (s.now_cost / 10) | round(1) }}m</span>
+                                        <span>Form {{ s.form }}</span>
+                                        <span>PPG {{ s.points_per_game }}</span>
+                                        <span>{{ s.minutes }}′</span>
+                                        {% if mode == 'fremover' %}<span class="accent">xS {{ s.future_score | round(2) }}</span>{% endif %}
+                                    </div>
                                 </li>
                             {% endfor %}
                         </ol>
+                    {% endif %}
+                {% elif mode and not error %}
+                    <div class="card empty">
+                        <p>No players found for £{{ budsjett }}m as {{ posisjon }} with at least {{ min_minutter }} minutes. Try a higher budget or fewer minimum minutes.</p>
+                    </div>
+                {% elif not error %}
+                    <div class="card empty">
+                        <p>Pick a budget and a position, then hit <strong>Best now</strong> or <strong>Best for future</strong>.</p>
                     </div>
                 {% endif %}
+            </section>
+        </main>
 
-                {% if mode == 'fremover' and fremover %}
-                    <div class="first-choice">
-                        <strong>First choice:</strong>
-                        <p>1. <strong>{{ fremover[0].first_name }} {{ fremover[0].second_name }}</strong> ({{ fremover[0].team_name }})  
-                        – £{{ (fremover[0].now_cost / 10) | round(1) }}m  
-                        – Form: {{ fremover[0].form }} — PPG: {{ fremover[0].points_per_game }}  
-                        – Expected: {{ fremover[0].future_score | round(2) }}</p>
-                    </div>
-                    <div class="other-choices">
-                        <strong>Other choices:</strong>
-                        <ol>
-                            {% for s in fremover[1:] %}
-                                <li>
-                                    <strong>{{ loop.index + 1 }}. {{ s.first_name }} {{ s.second_name }}</strong> ({{ s.team_name }})  
-                                    – £{{ (s.now_cost / 10) | round(1) }}m — Form: {{ s.form }} — PPG: {{ s.points_per_game }} — Expected: {{ s.future_score | round(2) }}
-                                </li>
-                            {% endfor %}
-                        </ol>
-                    </div>
-                {% endif %}
-            </div>
-        </div>
+        <footer>Data from the official Fantasy Premier League API. Not affiliated with the Premier League.</footer>
     </div>
 </body>
 </html>
